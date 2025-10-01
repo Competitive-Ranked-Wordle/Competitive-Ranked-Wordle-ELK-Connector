@@ -1,0 +1,12 @@
+mariadb:
+  user: ""
+  password: ""
+  host: ""
+  port: 3306
+  database: ""
+elasticsearch:
+  host: ""
+  cert: ""
+  scores_index: "wordle-scores"
+  players_index: "wordle-players"
+  api_key: ""

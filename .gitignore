@@ -1,0 +1,8 @@
+# Directories
+.venv/
+__pycache__/
+
+# Files
+*.pyc
+config.yml
+elk_cert.crt
