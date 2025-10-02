@@ -9,4 +9,5 @@ elasticsearch:
   cert: ""
   scores_index: "wordle-scores"
   players_index: "wordle-players"
+  enriched_index: "wordle-enriched"
   api_key: ""

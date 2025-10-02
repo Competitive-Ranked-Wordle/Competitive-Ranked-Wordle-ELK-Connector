@@ -31,6 +31,18 @@ class WordlELK:
             api_key=self.config['elasticsearch']['api_key']
         )
 
+        self.player_index = self.config['elasticsearch']['players_index']
+        self.score_index = self.config['elasticsearch']['scores_index']
+        self.enriched_index = self.config['elasticsearch']['enriched_index']
+
+    def handle_and_send(self, submissions: list, index: str, puzzle: int):
+        for submission in submissions:
+            puzzle_date = self.get_date_from_puzzle(puzzle)
+            puzzle_datetime = datetime.combine(puzzle_date, datetime.max.time())
+            submission['timestamp'] = puzzle_datetime
+            res = self.elk.index(index=index, document=submission)
+            print(res['result'])
+
     def get_wordle_puzzle(self, puzzle_date):
         first_wordle = date(2021, 6, 19)
         delta = puzzle_date - first_wordle
@@ -45,19 +57,15 @@ class WordlELK:
         for i in range(start, stop):
             submissions = self.db.get_daily_submissions(f"WHERE puzzle = {i}")
             if submissions == []:
+                print(f"No Wordle Submissions for puzzle {i}")
                 continue
-            for submission in submissions:
-                puzzle_date = self.get_date_from_puzzle(i)
-                puzzle_datetime = datetime.combine(puzzle_date, datetime.max.time())
-                submission['timestamp'] = puzzle_datetime
-                res = self.elk.index(index=self.config['elasticsearch']['scores_index'], document=submission)
-                print(res['result'])
+            self.handle_and_send(submissions, self.score_index, i)
     
     def add_users(self):
         user_data = self.db.get_all_players()
         for user in user_data:
             user['timestamp'] = datetime.combine(date.today() - timedelta(days=1), datetime.max.time())
-            res = self.elk.index(index=self.config['elasticsearch']['players_index'], document=user)
+            res = self.elk.index(index=self.player_index, document=user)
             print(res['result'])
     
     def add_scores(self):
@@ -66,12 +74,23 @@ class WordlELK:
         if submissions == []:
             print("No submissions today :(")
             return False
-        for submission in submissions:
-            puzzle_date = self.get_date_from_puzzle(puzzle)
-            puzzle_datetime = datetime.combine(puzzle_date, datetime.max.time())
-            submission['timestamp'] = puzzle_datetime
-            res = self.elk.index(index=self.config['elasticsearch']['scores_index'], document=submission)
-            print(res['result'])
+        self.handle_and_send(submissions, self.score_index, puzzle)
+
+    def enriched_backfill(self, start: int, stop: int):
+        for i in range(start, stop):
+            submissions = self.db.get_enriched_puzzle_results(i)
+            if submissions == []:
+                print(f"No Wordle Submissions for puzzle {i}")
+                continue
+            self.handle_and_send(submissions, self.enriched_index, i)
+    
+    def add_enriched(self):
+        puzzle = self.get_wordle_puzzle(date.today() - timedelta(days=1))
+        submissions = self.db.get_enriched_puzzle_results(puzzle)
+        if submissions == []:
+            print("No submissions today :(")
+            return False
+        self.handle_and_send(submissions, self.enriched_index, puzzle)
 
 if __name__ == '__main__':
     import os
@@ -83,13 +102,19 @@ if __name__ == '__main__':
 
     subparsers = parser.add_subparsers(dest='mode', help='Available Commands')
     
-    mode_parser = subparsers.add_parser('backfill')
-    mode_parser.add_argument('--start', required=True)
-    mode_parser.add_argument('--end', required=True)
+    backfill_parser = subparsers.add_parser('backfill')
+    backfill_parser.add_argument('--start', required=True)
+    backfill_parser.add_argument('--end', required=True)
 
     score_parser = subparsers.add_parser('add_scores')
 
     user_parser = subparsers.add_parser('add_users')
+
+    enriched_backfill_parser = subparsers.add_parser('enriched_backfill')
+    enriched_backfill_parser.add_argument('--start', required=True)
+    enriched_backfill_parser.add_argument('--end', required=True)
+
+    enriched_parser = subparsers.add_parser('add_enriched')
 
     args = parser.parse_args()
 
@@ -109,3 +134,9 @@ if __name__ == '__main__':
         case 'add_users':
             print('Adding Current User Information to ELK')
             connector.add_users()
+        case 'enriched_backfill':
+            print(f"Backfilling enriched data between Wordle {args.start} and {args.end}")
+            connector.enriched_backfill(int(args.start), int(args.end))
+        case 'add_enriched':
+            print('Adding enriched data from yesterday to ELK')
+            connector.add_enriched()

@@ -55,6 +55,30 @@ class MariaDB:
         cur = conn.cursor()
         return conn, cur
     
+    def collate_cols(self, cols: list):
+        query_string = ""
+        i = 1
+        for col in cols:
+            query_add = ""
+            if i == len(cols):
+                query_add = f"{col} "
+            else:
+                query_add = f"{col}, "
+            query_string = f"{query_string}{query_add}"
+            i += 1
+        return query_string
+    
+    def db_to_json(self, cols: list, data: list):
+        json_data = []
+        for row in data:
+            i = 0
+            row_dict = {}
+            for cell in row:
+                row_dict[cols[i]] = cell
+                i += 1
+            json_data.append(row_dict)
+        return json_data
+
     def get_daily_submissions(self, filters: str):
         conn, cur = self.connect_db()
         
@@ -74,33 +98,14 @@ class MariaDB:
             'ordinal_delta' 
         ]
 
-        query_string = f"SELECT "
-        i = 1
-        for col in cols:
-            query_add = ""
-            if i == len(cols):
-                query_add = f"{col} "
-            else:
-                query_add = f"{col}, "
-            query_string = f"{query_string}{query_add}"
-            i += 1
-        query_string = f"{query_string}FROM scores {filters}" 
+        query_string = f"SELECT {self.collate_cols(cols)}FROM scores {filters}"
         cur.execute(query_string)
         scores_raw = cur.fetchall()
-        
-        score_data = []
-        for row in scores_raw:
-            i = 0
-            row_dict = {}
-            for cell in row:
-                row_dict[cols[i]] = cell
-                i += 1
-            score_data.append(row_dict)
-
+        score_data = self.db_to_json(scores_raw)
         conn.close()
         return score_data
 
-    def get_all_players(self):
+    def get_all_players(self, filters: str = ""):
         conn, cur = self.connect_db()
 
         cols = [
@@ -118,29 +123,40 @@ class MariaDB:
             'sigma_delta' 
         ]
 
-        query_string = f"SELECT "
-        i = 1
-        for col in cols:
-            query_add = ""
-            if i == len(cols):
-                query_add = f"{col} "
-            else:
-                query_add = f"{col}, "
-            query_string = f"{query_string}{query_add}"
-            i += 1
+        query_string = f"SELECT {self.collate_cols(cols)}FROM players"
+        if filters:
+            query_string = f"{query_string} WHERE {filters}"
 
-        query_string = f"{query_string}FROM players"
         cur.execute(query_string)
         player_raw = cur.fetchall()
-
-        players = []
-        for player in player_raw:
-            player_data = {}
-            i = 0
-            for cell in player:
-                player_data[cols[i]] = cell
-                i += 1
-            players.append(player_data)
-
+        players = self.db_to_json(cols, player_raw)
         conn.close()
         return players
+    
+    def get_enriched_puzzle_results(self, puzzle: int):
+        conn, cur = self.connect_db()
+
+        cols = [
+            'scores.player_id',
+            'scores.puzzle',
+            'scores.raw_score',
+            'scores.score',
+            'scores.calculated_score',
+            'scores.hard_mode',
+            'scores.elo',
+            'scores.mu',
+            'scores.sigma',
+            'scores.ordinal',
+            'scores.elo_delta',
+            'scores.ordinal_delta',
+            'players.player_name',
+            'players.player_uuid',
+            'players.player_platform'
+        ]
+
+        query_string = f"SELECT {self.collate_cols(cols)}FROM scores INNER JOIN players ON scores.player_id = players.player_id WHERE puzzle = {puzzle}"
+        cur.execute(query_string)
+        data = cur.fetchall()
+        data = self.db_to_json(cols, data)
+        conn.close()
+        return data
